@@ -1,19 +1,15 @@
 // NCCIA UDC Preparation — database schema
 //
-// Default provider is "sqlite" so the app runs with zero external services
-// for local development and evaluation. For production, change the
-// `provider` below to "postgresql" and point DATABASE_URL at a real
-// Postgres instance (see DEPLOYMENT_GUIDE.md). Enum-like fields are kept as
-// plain String columns (validated in application code via zod, see
-// src/lib/types.ts) rather than Prisma `enum`, specifically so this file
-// does not need to change when you switch providers.
+// Production configuration using PostgreSQL for deployment on Render + managed DB.
+// Enum-like fields are kept as plain String columns (validated in application
+// code via zod, see src/lib/types.ts) rather than Prisma `enum`.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
