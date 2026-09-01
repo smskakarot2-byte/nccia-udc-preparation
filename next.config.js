@@ -10,23 +10,6 @@ const nextConfig = {
   // This prevents build-time database errors when DATABASE_URL is not available
   experimental: {
     serverComponentsExternalPackages: ['@prisma/client']
-  },
-  // Force all routes to be rendered at request time (not build time)
-  // This allows the app to build without DATABASE_URL and work on Render
-  trailingSlash: false,
-  // Mark pages that use DB as dynamic
-  async headers() {
-    return [
-      {
-        source: '/admin/:path*',
-        headers: [
-          {
-            key: 'x-nextjs-dynamic',
-            value: 'force-dynamic'
-          }
-        ]
-      }
-    ];
   }
 };
 
