@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: nccia-udc-preparation
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: ENABLED_SOURCES
+        value: demo
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
