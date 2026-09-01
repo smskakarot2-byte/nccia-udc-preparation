@@ -1,0 +1,66 @@
+# docker compose up -d
+#
+# Starts Postgres, runs migrations + seed once, then starts the app.
+# This is the "Docker VPS" deployment path described in DEPLOYMENT_GUIDE.md.
+# For local development without Docker, `npm run dev` with the default
+# SQLite DATABASE_URL is faster — see INSTALLATION_GUIDE.md.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nccia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nccia_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-nccia_udc}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nccia}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      target: builder
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nccia}:${POSTGRES_PASSWORD:-nccia_dev_password}@postgres:5432/${POSTGRES_DB:-nccia_udc}?schema=public
+    command: >
+      sh -c "sed -i 's/provider = \"sqlite\"/provider = \"postgresql\"/' prisma/schema.prisma &&
+             npx prisma migrate deploy &&
+             npx prisma db seed"
+
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nccia}:${POSTGRES_PASSWORD:-nccia_dev_password}@postgres:5432/${POSTGRES_DB:-nccia_udc}?schema=public
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
+      SESSION_SECRET: ${SESSION_SECRET}
+      ENABLED_SOURCES: ${ENABLED_SOURCES:-demo}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  pgdata:

@@ -1,0 +1,205 @@
+// NCCIA UDC Preparation — database schema
+//
+// Default provider is "sqlite" so the app runs with zero external services
+// for local development and evaluation. For production, change the
+// `provider` below to "postgresql" and point DATABASE_URL at a real
+// Postgres instance (see DEPLOYMENT_GUIDE.md). Enum-like fields are kept as
+// plain String columns (validated in application code via zod, see
+// src/lib/types.ts) rather than Prisma `enum`, specifically so this file
+// does not need to change when you switch providers.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// A job/exam profile, e.g. "NCCIA UDC", "FIA", "PPSC". Lets the whole
+/// syllabus + source-relevance configuration be swapped without touching
+/// application code (spec section 44).
+model JobProfile {
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "nccia-udc"
+  name        String // e.g. "NCCIA — Upper Division Clerk"
+  description String?
+  isActive    Boolean  @default(true)
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subjects        SyllabusSubject[]
+  mcqs            Mcq[]
+  extractionJobs  ExtractionJob[]
+  testAttempts    TestAttempt[]
+}
+
+/// One syllabus subject for a job profile, with the keyword rules the
+/// rule-based relevance filter uses (src/lib/relevance-filter.ts).
+/// `keywords` and `excludeKeywords` are comma-separated (portable across
+/// sqlite/postgres without a native array type).
+model SyllabusSubject {
+  id              String     @id @default(cuid())
+  jobProfile      JobProfile @relation(fields: [jobProfileId], references: [id], onDelete: Cascade)
+  jobProfileId    String
+  name            String // e.g. "Computer Science / IT"
+  slug            String // e.g. "computer"
+  keywords        String // comma-separated include keywords/phrases
+  excludeKeywords String  @default("") // comma-separated exclusion keywords
+  minKeywordHits  Int     @default(1)
+  isActive        Boolean @default(true)
+  sortOrder       Int     @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([jobProfileId, slug])
+}
+
+/// One configured scraper/source adapter. Rows are seeded for all 15
+/// requested websites plus "demo". `status` reflects whether the adapter
+/// has real, verified selectors wired up yet.
+model Source {
+  id               String   @id @default(cuid())
+  key              String   @unique // e.g. "testpoint"
+  name             String // display name, e.g. "TestPoint"
+  baseUrl          String
+  isEnabled        Boolean  @default(false)
+  /// "not_configured" | "ok" | "error" | "disabled"
+  status           String   @default("not_configured")
+  notes            String?  // human-readable integration notes
+  lastRunAt        DateTime?
+  questionsFoundLast Int    @default(0)
+  newQuestionsLast   Int    @default(0)
+  errorsLast         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  results ExtractionSourceResult[]
+}
+
+/// A single extraction run (manual click of "Extract New MCQs", or a
+/// scheduled run). Aggregate counters mirror the progress UI in the spec.
+model ExtractionJob {
+  id                  String    @id @default(cuid())
+  jobProfile          JobProfile @relation(fields: [jobProfileId], references: [id], onDelete: Cascade)
+  jobProfileId        String
+  /// "queued" | "running" | "completed" | "failed"
+  status              String    @default("queued")
+  triggeredBy         String    @default("manual") // "manual" | "scheduled"
+  sourcesRequested    String // comma-separated source keys included in this run
+  questionsDiscovered Int       @default(0)
+  relevantCount       Int       @default(0)
+  duplicateCount      Int       @default(0)
+  irrelevantCount     Int       @default(0)
+  invalidCount        Int       @default(0)
+  savedCount          Int       @default(0)
+  errorMessage        String?
+  startedAt           DateTime  @default(now())
+  finishedAt          DateTime?
+  durationMs          Int?
+  createdAt           DateTime  @default(now())
+
+  results ExtractionSourceResult[]
+}
+
+/// Per-source outcome within one extraction job — powers the live
+/// progress list and the extraction-history detail view.
+model ExtractionSourceResult {
+  id        String   @id @default(cuid())
+  job       ExtractionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  jobId     String
+  source    Source   @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  sourceId  String
+  sourceKey String
+  /// "ok" | "error" | "skipped" | "not_configured"
+  status    String
+  found     Int      @default(0)
+  relevant  Int      @default(0)
+  duplicate Int      @default(0)
+  irrelevant Int     @default(0)
+  saved     Int      @default(0)
+  errorMessage String?
+  durationMs   Int    @default(0)
+  createdAt DateTime @default(now())
+}
+
+/// The MCQ bank itself. Field list follows spec section 6 closely.
+model Mcq {
+  id                 String   @id @default(cuid())
+  jobProfile         JobProfile @relation(fields: [jobProfileId], references: [id], onDelete: Cascade)
+  jobProfileId       String
+
+  question           String
+  optionA            String
+  optionB            String
+  optionC            String
+  optionD            String
+  /// "A" | "B" | "C" | "D" | null when not reliably known
+  correctOption      String?
+  correctAnswer      String?
+
+  subject            String
+  /// "easy" | "medium" | "hard"
+  difficulty         String   @default("medium")
+
+  sourceName         String // e.g. "Demo", "TestPoint"
+  sourceUrl          String?
+  sourceQuestionId   String?
+
+  extractedAt        DateTime @default(now())
+  normalizedQuestion String // lowercase/whitespace/punctuation-normalized text, for exact-dup checks
+  questionHash       String // sha256 of normalizedQuestion + normalized options, for fast exact-dup lookups
+
+  /// "auto_imported" | "verified" | "rejected"
+  verificationStatus String  @default("auto_imported")
+  isVerified         Boolean @default(false)
+  isActive           Boolean @default(true)
+
+  relevanceConfidence Float? // 0-1, when a relevance check produced a score
+  relevanceReason      String?
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  answers TestAttemptAnswer[]
+
+  @@index([questionHash])
+  @@index([subject])
+  @@index([sourceName])
+  @@index([isActive, isVerified])
+}
+
+/// One completed (or in-progress) quiz attempt.
+model TestAttempt {
+  id             String   @id @default(cuid())
+  jobProfile     JobProfile @relation(fields: [jobProfileId], references: [id], onDelete: Cascade)
+  jobProfileId   String
+  /// "practice" | "exam" | "random" | "subject"
+  mode           String
+  subject        String?
+  totalQuestions Int
+  correct        Int      @default(0)
+  incorrect      Int      @default(0)
+  unanswered     Int      @default(0)
+  scorePercent   Float    @default(0)
+  startedAt      DateTime @default(now())
+  finishedAt     DateTime?
+
+  answers TestAttemptAnswer[]
+}
+
+/// One answered (or skipped) question within an attempt.
+model TestAttemptAnswer {
+  id             String      @id @default(cuid())
+  attempt        TestAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  attemptId      String
+  mcq            Mcq         @relation(fields: [mcqId], references: [id], onDelete: Cascade)
+  mcqId          String
+  order          Int
+  selectedOption String? // "A" | "B" | "C" | "D" | null
+  isCorrect      Boolean?
+
+  @@index([attemptId])
+}
