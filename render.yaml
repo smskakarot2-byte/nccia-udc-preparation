@@ -4,7 +4,12 @@ services:
     env: node
     region: oregon
     plan: free
-    buildCommand: npm install && npx prisma generate && npm run build
+    # Build with placeholder DATABASE_URL to allow static generation during build
+    # Actual DB connection only happens at runtime
+    buildCommand: |
+      npm ci
+      npx prisma generate
+      DATABASE_URL="postgresql://placeholder:placeholder@placeholder:5432/placeholder?sslmode=require" npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
