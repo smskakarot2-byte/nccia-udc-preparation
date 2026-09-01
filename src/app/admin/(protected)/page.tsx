@@ -2,6 +2,8 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { Card, Button, Badge } from "@/components/ui";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminOverviewPage() {
   const [total, verified, needsVerification, sourcesEnabled, lastJob, subjects] = await Promise.all([
     db.mcq.count(),
